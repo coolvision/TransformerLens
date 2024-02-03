@@ -26,6 +26,9 @@ from typing_extensions import Literal
 import transformer_lens.utils as utils
 from transformer_lens.utils import Slice, SliceInput
 
+if is_bitsandbytes_available():
+    import bitsandbytes.functional as F
+
 
 class ActivationCache:
     """Activation Cache.
@@ -694,7 +697,13 @@ class ActivationCache:
             self.cache_dict[f"blocks.{l}.attn.hook_result"] = einsum(
                 "... head_index d_head, head_index d_head d_model -> ... head_index d_model",
                 self[("z", l, "attn")],
-                self.model.blocks[l].attn.W_O,
+                # self.model.blocks[l].attn.W_O,
+                F.dequantize_4bit(
+                    self.model.blocks[l].attn.W_O,
+                    self.model.blocks[l].attn.W_O.quant_state,
+                )
+                .to(self[("z", l, "attn")].dtype)
+                .t(),
             )
 
     def stack_head_results(
