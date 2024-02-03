@@ -21,6 +21,7 @@ import numpy as np
 import torch
 from fancy_einsum import einsum
 from jaxtyping import Float, Int
+from transformers.utils import is_bitsandbytes_available
 from typing_extensions import Literal
 
 import transformer_lens.utils as utils
@@ -691,7 +692,9 @@ class ActivationCache:
                 "Tried to compute head results when they were already cached"
             )
             return
+
         for l in range(self.model.cfg.n_layers):
+
             # Note that we haven't enabled set item on this object so we need to edit the underlying
             # cache_dict directly.
             self.cache_dict[f"blocks.{l}.attn.hook_result"] = einsum(
@@ -703,7 +706,12 @@ class ActivationCache:
                     self.model.blocks[l].attn.W_O.quant_state,
                 )
                 .to(self[("z", l, "attn")].dtype)
-                .t(),
+                .t()
+                .reshape(
+                    self.model.cfg.n_heads,
+                    self.model.cfg.d_head,
+                    self.model.cfg.d_model,
+                ),
             )
 
     def stack_head_results(
