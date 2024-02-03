@@ -592,14 +592,16 @@ class AbstractAttention(ABC, nn.Module):
         pattern = torch.where(torch.isnan(pattern), torch.zeros_like(pattern), pattern)
         pattern = self.hook_pattern(pattern)  # [batch, head_index, query_pos, key_pos]
         pattern = pattern.to(self.cfg.dtype)
+
         z = self.calculate_z_scores(v, pattern)  # [batch, pos, head_index, d_head]
+
         if not self.cfg.use_attn_result:
             if self.cfg.load_in_4bit:
+                self.W_O.quant_state.code = self.W_O.quant_state.code.to(z.device)
                 # call bitsandbytes method to dequantize and multiply
                 out = bnb.matmul_4bit(
                     z.reshape(z.shape[0], z.shape[1], self.cfg.d_model),
                     self.W_O.t(),
-                    # bias=self.W_O.t(),
                     bias=None,
                     quant_state=self.W_O.quant_state,
                 )
@@ -621,6 +623,7 @@ class AbstractAttention(ABC, nn.Module):
             # Explicitly calculate the attention result so it can be accessed by a hook
             # This is off by default because it can easily eat through your GPU memory.
             if self.cfg.load_in_4bit:
+                self.W_O.quant_state.code = self.W_O.quant_state.code.to(z.device)
                 result = self.hook_result(
                     bnb.matmul_4bit(
                         z.reshape(z.shape[0], z.shape[1], self.cfg.d_model),
@@ -672,6 +675,7 @@ class AbstractAttention(ABC, nn.Module):
             qkv_einops_string = "batch pos d_model"
 
         if self.cfg.load_in_4bit:
+            self.W_Q.quant_state.code = self.W_Q.quant_state.code.to(query_input.device)
             q = self.hook_q(
                 # call bitsandbytes method to dequantize and multiply
                 bnb.matmul_4bit(
@@ -698,6 +702,7 @@ class AbstractAttention(ABC, nn.Module):
                 + self.b_Q
             )  # [batch, pos, head_index, d_head]
         if self.cfg.load_in_4bit:
+            self.W_K.quant_state.code = self.W_K.quant_state.code.to(key_input.device)
             k = self.hook_k(
                 # call bitsandbytes method to dequantize and multiply
                 bnb.matmul_4bit(
@@ -722,6 +727,7 @@ class AbstractAttention(ABC, nn.Module):
             )  # [batch, pos, head_index, d_head]
 
         if self.cfg.load_in_4bit:
+            self.W_V.quant_state.code = self.W_V.quant_state.code.to(value_input.device)
             v = self.hook_v(
                 # call bitsandbytes method to dequantize and multiply
                 bnb.matmul_4bit(
@@ -771,6 +777,7 @@ class AbstractAttention(ABC, nn.Module):
         v: Float[torch.Tensor, "batch key_pos head_index d_head"],
         pattern: Float[torch.Tensor, "batch head_index query_pos key_pos"],
     ) -> Float[torch.Tensor, "batch query_pos head_index d_head"]:
+        pattern = pattern.to(v.device)
         z = self.hook_z(
             einsum(
                 "batch key_pos head_index d_head, \
@@ -807,8 +814,10 @@ class AbstractAttention(ABC, nn.Module):
         if attention_mask is not None:
             # Apply a causal mask to the attention scores considering the padding
             einsum_str = "batch head pos offset_pos, batch offset_pos -> batch head pos offset_pos"
+            final_mask = final_mask.to(attention_mask.device)
             final_mask = einops.einsum(final_mask, attention_mask, einsum_str).bool()
 
+        attn_scores = attn_scores.to(final_mask.device)
         return torch.where(final_mask, attn_scores, self.IGNORE)
 
     def calculate_sin_cos_rotary(
@@ -885,6 +894,7 @@ class AbstractAttention(ABC, nn.Module):
             offset_position_ids = get_offset_position_ids(
                 past_kv_pos_offset, attention_mask
             )
+            offset_position_ids = offset_position_ids.to(self.rotary_cos.device)
             mask_rotary_cos = self.rotary_cos[offset_position_ids, None, :]
             mask_rotary_sin = self.rotary_sin[offset_position_ids, None, :]
             x_rotated = x_rot * mask_rotary_cos + x_flip * mask_rotary_sin
@@ -1400,6 +1410,7 @@ class GatedMLP(nn.Module):
     ) -> Float[torch.Tensor, "batch pos d_model"]:
         # Technically, all these einsums could be done with a single matmul, but this is more readable.
         if self.cfg.load_in_4bit:
+            self.W_gate.quant_state.code = self.W_gate.quant_state.code.to(x.device)
             pre_act = self.hook_pre(
                 bnb.matmul_4bit(
                     x, self.W_gate.t(), bias=None, quant_state=self.W_gate.quant_state
@@ -1416,6 +1427,7 @@ class GatedMLP(nn.Module):
 
         if not self.cfg.act_fn.endswith("_ln"):
             if self.cfg.load_in_4bit:
+                self.W_in.quant_state.code = self.W_in.quant_state.code.to(x.device)
                 pre_linear = self.hook_pre_linear(
                     bnb.matmul_4bit(
                         x, self.W_in.t(), bias=None, quant_state=self.W_in.quant_state
@@ -1438,6 +1450,9 @@ class GatedMLP(nn.Module):
             post_act = self.hook_post(self.ln(mid_act))
 
         if self.cfg.load_in_4bit:
+            self.W_out.quant_state.code = self.W_out.quant_state.code.to(
+                post_act.device
+            )
             return bnb.matmul_4bit(
                 post_act, self.W_out.t(), bias=None, quant_state=self.W_out.quant_state
             )
