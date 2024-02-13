@@ -1566,7 +1566,8 @@ class TransformerBlock(nn.Module):
             else:
                 return repeated_tensor
 
-        if self.cfg.use_attn_in or self.cfg.use_split_qkv_input:
+        if self.cfg.use_attn_in:
+        # or self.cfg.use_split_qkv_input:
             # We're adding a head dimension
             attn_in = add_head_dimension(resid_pre, clone_tensor=False)
             if shortformer_pos_embed is not None:

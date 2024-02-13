@@ -453,7 +453,8 @@ class ActivationCache:
             if (incl_mid and l < layer) or (mlp_input and l == layer):
                 components.append(self[("resid_mid", l)])
                 labels.append(f"{l}_mid")
-        components = [pos_slice.apply(c, dim=-2) for c in components]
+        if len(components) > 0:
+            components = [pos_slice.apply(c, dim=-2).to(components[0].device) for c in components]
         components = torch.stack(components, dim=0)
         if apply_ln:
             components = self.apply_ln_to_stack(
@@ -666,7 +667,8 @@ class ActivationCache:
         if mlp_input and incl_attn:
             components.append(self[("attn_out", layer)])
             labels.append(f"{layer}_attn_out")
-        components = [pos_slice.apply(c, dim=-2) for c in components]
+        if len(components) > 0:
+            components = [pos_slice.apply(c, dim=-2).to(components[0].device) for c in components]
         components = torch.stack(components, dim=0)
         if apply_ln:
             components = self.apply_ln_to_stack(
@@ -761,6 +763,8 @@ class ActivationCache:
             components.append(pos_slice.apply(self[("result", l, "attn")], dim=-3))
             labels.extend([f"L{l}H{h}" for h in range(self.model.cfg.n_heads)])
         if components:
+            if len(components) > 0:
+                components = [c.to(components[0].device) for c in components]
             components = torch.cat(components, dim=-2)
             components = einops.rearrange(
                 components,
@@ -931,6 +935,8 @@ class ActivationCache:
             )
             labels.extend([f"L{l}N{h}" for h in neuron_labels])
         if components:
+            if len(components) > 0:
+                components = [c.to(components[0].device) for c in components]            
             components = torch.cat(components, dim=-2)
             components = einops.rearrange(
                 components,
