@@ -1523,6 +1523,7 @@ class TransformerBlock(nn.Module):
 
         self.hook_attn_out = HookPoint()  # [batch, pos, d_model]
         self.hook_mlp_out = HookPoint()  # [batch, pos, d_model]
+        self.hook_layer_out = HookPoint()  # [batch, pos, d_model]
 
         self.hook_resid_pre = HookPoint()  # [batch, pos, d_model]
         if not self.cfg.attn_only and not self.cfg.parallel_attn_mlp:
@@ -1617,6 +1618,11 @@ class TransformerBlock(nn.Module):
             resid_post = self.hook_resid_post(
                 resid_mid + mlp_out
             )  # [batch, pos, d_model]
+
+            layer_out = self.hook_layer_out(
+                attn_out + mlp_out
+            )
+
         elif self.cfg.parallel_attn_mlp:
             # Dumb thing done by GPT-J, both MLP and Attn read from resid_pre and write to resid_post, no resid_mid used.
             # In GPT-J, LN1 and LN2 are tied, in GPT-NeoX they aren't.
